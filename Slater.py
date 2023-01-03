@@ -477,68 +477,67 @@ def getDensityHigherDerivativeHandle(slaterDensity, spinComponent, derIndices):
 
 
 quadBatch = 100000
-DMFiles = ['DM']
+DMFiles = ['DensityMatrix_inverse_slater_QZ4P_projection0',\
+           'DensityMatrix_inverse_slater_QZ4P_projection1']
+nSpin = len(DMFiles)
 sd = SlaterDensity('AtomicCoords_Slater', DMFiles)
 quad = np.loadtxt('QuadWeights', dtype = np.float64, usecols=(0,1,2,4))
-nquad = quad.shape[0]
-ne = 0.0
+nQuadAll = quad.shape[0]
+ne = [0.0]*nSpin
 nx = 5
 numFDPoints = 9
 h = 1e-4
 densityEval1 = sd.getDensityEvalHandle(0)
 densityEval2 = sd.getDensityEvalHandleSplit(0)
-#for i in range(0,nquad,quadBatch):
-#    minId = i
-#    maxId = min(minId+quadBatch, nquad)
-#    x = quad[minId:maxId, 0:3]
-#    w = quad[minId:maxId, 3]
-#    #rho = sd.getDensity(x, 0)
-#    #rho = densityEval1(x)
-#    rho = densityEval2(x[:,0], x[:,1], x[:,2])
-#    ne += np.dot(rho,w)
-#
-#print ("Num. of electrons:", ne)
+
+for i in range(0,nQuadAll,quadBatch):
+    minId = i
+    maxId = min(minId+quadBatch, nQuadAll)
+    x = quad[minId:maxId, 0:3]
+    w = quad[minId:maxId, 3]
+    for iSpin in range(nSpin):
+        #rho = sd.getDensityEvalHandleSplit(iSpin)
+        rho = sd.getDensity(x, iSpin)
+        #rho = f(x[:,0], x[:,1], x[:,2])
+        ne[iSpin] += np.dot(rho,w)
+
+for iSpin in range(nSpin):
+    print ("Num. of spin", iSpin, "electrons:", ne[iSpin])
+
+outFs = []
+for iSpin in range(nSpin):
+    outF = open("RhoSlaterData"+str(iSpin),"w")
+    outFs.append(outF)
+
+for i in range(0,nQuadAll,quadBatch):
+    minId = i
+    maxId = min(minId+quadBatch, nQuadAll)
+    x = quad[minId:maxId, 0:3]
+    nQuad = x.shape[0]
+
+    for iSpin in range(nSpin):
+        rho = sd.getDensity(x,iSpin)
+        drho = np.zeros((nQuad,3))
+        ddrho = np.zeros((nQuad,3,3))
+        for iComp in range(3):
+            drho[:,iComp] = sd.getDensityDerivative(x, iComp, iSpin)
+            for jComp in range(iComp,3):
+                ddrho[:,iComp,jComp] = sd.getDensityDoubleDerivative(x, iComp,\
+                                                                     jComp,\
+                                                                     iSpin)
+                ddrho[:,jComp,iComp] = ddrho[:,iComp,jComp]
+
+        outF = outFs[iSpin]
+        for iQuad in range(nQuad):
+            print(''.join([str(y) + " " for y in x[iQuad]]), file=outF, end=' ')
+            print(rho[iQuad], file=outF, end=' ')
+            print(''.join([str(y) + " " for y in drho[iQuad]]), file=outF, end=' ')
+            for iComp in range(3):
+                print(''.join([str(y) + " " for y in ddrho[iQuad,iComp]]), file=outF, end=' ')
+           
+            print(file=outF)
 
 
-#x = anp.random.rand(nx,3)
-x = anp.zeros((nx, 3), dtype=np.float64)
-x[:] = anp.random.randn(*x.shape)
 
-t1 = timer()
-df1 = np.zeros_like(x)
-for i in range(3):
-    derIndices = [i]
-    df1[:,i]=getFunctionHigherOrderDerivativeFD(x,derIndices, numFDPoints, h,\
-                                                densityEval1)
-ddf1 = np.zeros((x.shape[0],3,3))
-for i in range(3):
-    for j in range(3):
-        derIndices = [i,j]
-        ddf1[:,i,j] =getFunctionHigherOrderDerivativeFD(x, derIndices,\
-                                                        numFDPoints,h,densityEval1)
-
-t2 = timer()
-
-t3 = timer()
-df2 = np.zeros((x.shape[0],3))
-ddf2 = np.zeros((x.shape[0],3,3))
-for i in range(3):
-    derIndices = [i]
-    df = getDensityHigherDerivativeHandle(sd, 0, derIndices)
-    df2[:,i] = sd.getDensityDerivative(x, i, 0)
-    #df2[:,i] = df(x[:,0],x[:,1],x[:,2])
-
-for i in range(3):
-    for j in range(3):
-        ddf2[:,i,j] = sd.getDensityDoubleDerivative(x, i, j, 0)
-
-t4 = timer()
-
-dfAbs = np.linalg.norm(df2,ord='fro')
-diffDf12 = np.linalg.norm(df1-df2,ord='fro')
-ddfAbs = np.linalg.norm(ddf2)
-diffDDf12 = np.linalg.norm(ddf1-ddf2)
-print("Diff df:", diffDf12)
-print("Diff ddf:", diffDDf12)
-print("Time FD:", t2-t1)
-print("Time autograd:", t4-t3)
+for iSpin in range(nSpin):
+    outFs[iSpin].close()
